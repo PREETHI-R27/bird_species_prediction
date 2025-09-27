@@ -1,0 +1,123 @@
+import tensorflow as tf
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
+from tensorflow.keras.models import Model
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import numpy as np
+
+# Paths
+train_dir = 'C:\\Users\\PREETHI R\\Downloads\\Telegram Desktop\\6 SEM\\INTERSHIP\\BIRDS\\BIRDS DATASET\\train'
+valid_dir = 'C:\\Users\\PREETHI R\\Downloads\\Telegram Desktop\\6 SEM\\INTERSHIP\\BIRDS\\BIRDS DATASET\\valid'
+
+# Set up data generators with more augmentation
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    rotation_range=40,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
+    fill_mode='nearest'
+)
+valid_datagen = ImageDataGenerator(rescale=1./255)
+
+train_data = train_datagen.flow_from_directory(
+    train_dir, 
+    target_size=(224, 224), batch_size=32, class_mode='categorical')
+valid_data = valid_datagen.flow_from_directory(
+    valid_dir, 
+    target_size=(224, 224), batch_size=32, class_mode='categorical')
+
+# Build the model with regularization
+base_model = MobileNetV2(include_top=False, weights='imagenet', input_shape=(224, 224, 3))
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+x = Dropout(0.5)(x)  # dropout for regularization
+output = Dense(units=train_data.num_classes, activation='softmax')(x)
+
+model = Model(inputs=base_model.input, outputs=output)
+
+# Freeze the base model
+base_model.trainable = False
+
+# Compile the model
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Callbacks for early stopping and learning rate reduction
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=0.00001)
+
+# Train the model
+history = model.fit(
+    train_data,
+    epochs=10,
+    batch_size=32,
+    validation_data=valid_data,
+    callbacks=[early_stopping, reduce_lr]
+)
+
+# Unfreeze some layers of the base model for fine-tuning
+for layer in base_model.layers[-20:]:
+    layer.trainable = True
+
+# Compile the model with a lower learning rate for fine-tuning
+model.compile(optimizer=tf.keras.optimizers.Adam(1e-5), loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Continue training the model with fine-tuning
+history_fine = model.fit(
+    train_data,
+    epochs=10,
+    batch_size=32,
+    validation_data=valid_data,
+    callbacks=[early_stopping, reduce_lr]
+)
+
+# Save the model in the new format
+model.save('C:\\Users\\PREETHI R\\Downloads\\Telegram Desktop\\6 SEM\\INTERSHIP\\BIRDS\\final\\my_model.keras')
+
+# Plot Training/Validation Accuracy and Loss
+def plot_training_history(history, title):
+    acc = history.history['accuracy']
+    val_acc = history.history['val_accuracy']
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+    epochs_range = range(len(acc))
+
+    plt.figure(figsize=(12, 8))
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs_range, acc, label='Training Accuracy')
+    plt.plot(epochs_range, val_acc, label='Validation Accuracy')
+    plt.legend(loc='lower right')
+    plt.title(f'Training and Validation Accuracy ({title})')
+
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs_range, loss, label='Training Loss')
+    plt.plot(epochs_range, val_loss, label='Validation Loss')
+    plt.legend(loc='upper right')
+    plt.title(f'Training and Validation Loss ({title})')
+    plt.show()
+
+# Plot the initial training history
+plot_training_history(history, 'Initial Training')
+# Plot the fine-tuning training history
+plot_training_history(history_fine, 'Fine-Tuning')
+
+# Confusion Matrix
+def plot_confusion_matrix(model, valid_data, class_names):
+    valid_data.reset()
+    y_pred = model.predict(valid_data, steps=valid_data.samples // valid_data.batch_size + 1)
+    y_pred_classes = np.argmax(y_pred, axis=1)
+    y_true = valid_data.classes
+
+    cm = confusion_matrix(y_true, y_pred_classes)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
+    disp.plot(cmap=plt.cm.Blues)
+    plt.title('Confusion Matrix')
+    plt.show()
+
+# Plot confusion matrix
+plot_confusion_matrix(model, valid_data, list(train_data.class_indices.keys()))
