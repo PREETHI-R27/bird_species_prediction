@@ -1,0 +1,39 @@
+import gradio as gr
+import tensorflow as tf
+import numpy as np
+
+def predict_species_gradio(image_path):
+    # Load the saved model
+    loaded_model = tf.keras.models.load_model('/content/my_model_1.keras')
+
+    # Defining class names
+    class_names = ['BANDED BROADBILL', 'BIRD OF PARADISE']
+    confidence_threshold = 0.95
+
+    test_image = tf.keras.preprocessing.image.load_img(image_path, target_size=(224, 224))
+    test_image_array = tf.keras.preprocessing.image.img_to_array(test_image)
+    test_image_array = np.expand_dims(test_image_array, axis=0)  # Add batch dimension
+    test_image_array /= 255.0  # Rescale
+    predictions = loaded_model.predict(test_image_array)
+    class_index = np.argmax(predictions[0])
+    confidence = predictions[0][class_index]
+
+    # Sort predictions for a secondary check
+    sorted_confidences = np.sort(predictions[0])[::-1]
+
+    # Stricter threshold and secondary check
+    if confidence < confidence_threshold or (len(sorted_confidences) > 1 and sorted_confidences[0] - sorted_confidences[1] < 0.1):
+        return "Not the data I have been trained on"
+    else:
+        predicted_species = class_names[class_index]
+        return predicted_species
+
+iface = gr.Interface(
+    fn=predict_species_gradio,
+    inputs=gr.Image(type="filepath"),
+    outputs=gr.Textbox(),
+    title="Bird Species Prediction",
+    description="Upload an image of a bird to get a species prediction."
+)
+
+iface.launch()
